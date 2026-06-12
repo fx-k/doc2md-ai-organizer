@@ -63,13 +63,18 @@ pip install -r requirements-ocr-example.txt
 brew install --cask libreoffice
 ```
 
-配置 AI 接口。你可以先复制示例配置文件，但脚本本身读取的是环境变量，所以需要在 shell 中 export：
+配置 AI 接口。脚本会自动读取项目目录下的 `.env`，也可以读取当前 shell 中已经 export 的环境变量。命令行参数优先级最高，其次是环境变量，最后才是 `.env`：
 
 ```bash
 cp .env.example .env
-export AI_BASE_URL="https://api.openai.com/v1"
-export AI_API_KEY="你的 API Key"
-export AI_MODEL="gpt-4o-mini"
+```
+
+然后编辑 `.env`，填入你的 AI 接口配置：
+
+```env
+AI_BASE_URL=https://api.openai.com/v1
+AI_API_KEY=你的 API Key
+AI_MODEL=gpt-4o-mini
 ```
 
 运行转换：
@@ -88,10 +93,10 @@ export AI_MODEL="gpt-4o-mini"
 
 如果你使用本地模型网关或公司内部模型网关，可以这样配置：
 
-```bash
-export AI_BASE_URL="http://127.0.0.1:8317/v1"
-export AI_MODEL="你的模型名称"
-export AI_API_KEY="如果网关需要 key，就填这里"
+```env
+AI_BASE_URL=http://127.0.0.1:8317/v1
+AI_MODEL=你的模型名称
+AI_API_KEY=如果网关需要 key，就填这里
 ```
 
 如果本地网关不校验 key，可以让 `AI_API_KEY` 为空。
@@ -191,6 +196,37 @@ python -c "import markitdown; print('markitdown ok')"
 ```bash
 ./ocr_markdown_pipeline.py "/path/to/source-folder" \
   --ocr-python ".venv/bin/python"
+```
+
+### AI 重命名阶段提示 `Remote end closed connection without response`
+
+这说明 OCR 已经完成，问题发生在连接 AI 接口时。常见原因：
+
+- 没有配置 `AI_API_KEY`
+- `AI_BASE_URL` 仍是默认的 `https://api.openai.com/v1`，但当前网络无法访问
+- 本地或公司模型网关地址填错
+- 代理、证书或网关服务临时断开
+
+先用 dry-run 检查脚本实际读到的配置：
+
+```bash
+./ocr_markdown_pipeline.py "/path/to/source-folder" --dry-run
+```
+
+重点看输出里的：
+
+```text
+AI base URL: ...
+AI model: ...
+AI API key configured: True/False
+```
+
+如果你使用本地网关，请把 `.env` 改成你的网关地址，例如：
+
+```env
+AI_BASE_URL=http://127.0.0.1:8317/v1
+AI_MODEL=你的模型名称
+AI_API_KEY=如果需要就填写
 ```
 
 ## 第三方开源项目说明

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -55,6 +57,27 @@ def ensure_python_version() -> None:
             f"Python {required}+ is required. Current Python version is {current}. "
             "Create a virtual environment with python3.10 or newer."
         )
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def load_env_files() -> None:
+    load_env_file(PROJECT_DIR / ".env")
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env != PROJECT_DIR / ".env":
+        load_env_file(cwd_env)
 
 
 @dataclass(frozen=True)
@@ -422,6 +445,14 @@ def ai_json(config: Config, system_prompt: str, user_prompt: str) -> dict[str, A
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             raise PipelineError(f"AI HTTP {exc.code}: {error_body[:2000]}") from exc
+        except (urllib.error.URLError, http.client.RemoteDisconnected, TimeoutError, socket.timeout, OSError) as exc:
+            raise PipelineError(
+                "AI request failed before receiving a response. "
+                f"base_url={config.ai_base_url}, model={config.ai_model}, "
+                f"api_key_configured={bool(config.ai_api_key)}. "
+                "Check AI_BASE_URL, AI_API_KEY, network/proxy settings, or your local OpenAI-compatible gateway. "
+                f"Original error: {exc!r}"
+            ) from exc
         data = json.loads(raw)
         content = data["choices"][0]["message"]["content"]
         return parse_json_object(content)
@@ -596,7 +627,7 @@ def organize_files(
         save_manifest(manifest_path, manifest)
 
 
-def validate_config(config: Config) -> None:
+def validate_config(config: Config, require_ai: bool = True) -> None:
     if not config.input_dir.exists() or not config.input_dir.is_dir():
         raise PipelineError(f"Input folder does not exist or is not a directory: {config.input_dir}")
     if not config.ocr_python.exists():
@@ -607,6 +638,11 @@ def validate_config(config: Config) -> None:
         raise PipelineError(f"Configured soffice does not exist: {config.soffice}")
     if config.output_dir.resolve() == config.input_dir.resolve():
         raise PipelineError("Output folder cannot be the same as input folder")
+    if require_ai and config.ai_base_url.rstrip("/") == "https://api.openai.com/v1" and not config.ai_api_key:
+        raise PipelineError(
+            "AI_API_KEY is required when AI_BASE_URL is https://api.openai.com/v1. "
+            "Set AI_API_KEY in your shell or in .env, or set AI_BASE_URL to your local OpenAI-compatible gateway."
+        )
 
 
 def make_config(args: argparse.Namespace) -> Config:
@@ -646,7 +682,7 @@ def make_config(args: argparse.Namespace) -> Config:
 
 
 def run_pipeline(config: Config) -> None:
-    validate_config(config)
+    validate_config(config, require_ai=not config.dry_run)
     files = discover_files(config.input_dir, config.include_hidden)
     if not files:
         raise PipelineError(f"No files found in input folder: {config.input_dir}")
@@ -660,6 +696,9 @@ def run_pipeline(config: Config) -> None:
         print(f"OCR python: {config.ocr_python}")
         print(f"OCR script: {config.ocr_script}")
         print(f"soffice: {config.soffice or 'not found'}")
+        print(f"AI base URL: {config.ai_base_url}")
+        print(f"AI model: {config.ai_model}")
+        print(f"AI API key configured: {bool(config.ai_api_key)}")
         return
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -678,6 +717,7 @@ def run_pipeline(config: Config) -> None:
     manifest["soffice"] = str(config.soffice) if config.soffice else None
     manifest["ai_base_url"] = config.ai_base_url
     manifest["ai_model"] = config.ai_model
+    manifest["ai_api_key_configured"] = bool(config.ai_api_key)
     save_manifest(manifest_path, manifest)
 
     logging.info("Input folder: %s", config.input_dir)
@@ -685,6 +725,9 @@ def run_pipeline(config: Config) -> None:
     logging.info("OCR python: %s", config.ocr_python)
     logging.info("OCR script: %s", config.ocr_script)
     logging.info("soffice: %s", config.soffice or "not found")
+    logging.info("AI base URL: %s", config.ai_base_url)
+    logging.info("AI model: %s", config.ai_model)
+    logging.info("AI API key configured: %s", bool(config.ai_api_key))
     logging.info("Discovered %s file(s)", len(files))
 
     records: list[tuple[Path, dict[str, Any]]] = []
@@ -810,6 +853,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     try:
         ensure_python_version()
+        load_env_files()
         args = parse_args(argv)
         config = make_config(args)
         run_pipeline(config)
