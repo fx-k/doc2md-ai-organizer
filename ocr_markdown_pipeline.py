@@ -143,6 +143,13 @@ def resolve_soffice(value: Path | None) -> Path | None:
     return None
 
 
+def executable_path(value: Path) -> Path:
+    path = value.expanduser()
+    if path.is_absolute():
+        return path
+    return path.absolute()
+
+
 def atomic_write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -332,9 +339,11 @@ def convert_one_file(source: Path, dest: Path, config: Config, errors_path: Path
             return
 
         env = os.environ.copy()
-        venv_dir = config.ocr_python.parent.parent
-        env["VIRTUAL_ENV"] = str(venv_dir)
-        env["PATH"] = f"{config.ocr_python.parent}{os.pathsep}{env.get('PATH', '')}"
+        python_bin = config.ocr_python.parent
+        venv_dir = python_bin.parent
+        if (venv_dir / "pyvenv.cfg").exists():
+            env["VIRTUAL_ENV"] = str(venv_dir)
+        env["PATH"] = f"{python_bin}{os.pathsep}{env.get('PATH', '')}"
 
         command = [str(config.ocr_python), str(config.ocr_script), str(source)]
         timeout = config.ocr_timeout_seconds or None
@@ -608,7 +617,7 @@ def make_config(args: argparse.Namespace) -> Config:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         output_dir = output_parent / f"{OUTPUT_PREFIX}{input_dir.name}-{stamp}"
 
-    ocr_python = args.ocr_python.expanduser().resolve() if args.ocr_python else Path(sys.executable).resolve()
+    ocr_python = executable_path(args.ocr_python) if args.ocr_python else Path(sys.executable)
     ocr_script = args.ocr_script.expanduser().resolve() if args.ocr_script else DEFAULT_OCR_SCRIPT
     soffice = resolve_soffice(args.soffice)
     state_dir = output_dir / STATE_DIR_NAME
@@ -648,6 +657,8 @@ def run_pipeline(config: Config) -> None:
         print(f"Output: {config.output_dir}")
         print(f"Files:  {len(files)}")
         print(f"Legacy Office files needing pre-conversion: {legacy_count}")
+        print(f"OCR python: {config.ocr_python}")
+        print(f"OCR script: {config.ocr_script}")
         print(f"soffice: {config.soffice or 'not found'}")
         return
 
@@ -662,6 +673,7 @@ def run_pipeline(config: Config) -> None:
     manifest = load_manifest(manifest_path)
     manifest["input_dir"] = str(config.input_dir)
     manifest["output_dir"] = str(config.output_dir)
+    manifest["ocr_python"] = str(config.ocr_python)
     manifest["ocr_script"] = str(config.ocr_script)
     manifest["soffice"] = str(config.soffice) if config.soffice else None
     manifest["ai_base_url"] = config.ai_base_url
@@ -670,6 +682,8 @@ def run_pipeline(config: Config) -> None:
 
     logging.info("Input folder: %s", config.input_dir)
     logging.info("Output folder: %s", config.output_dir)
+    logging.info("OCR python: %s", config.ocr_python)
+    logging.info("OCR script: %s", config.ocr_script)
     logging.info("soffice: %s", config.soffice or "not found")
     logging.info("Discovered %s file(s)", len(files))
 

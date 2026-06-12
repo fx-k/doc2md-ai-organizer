@@ -172,6 +172,27 @@ examples/ocr_adapter.py
 ./ocr_markdown_pipeline.py "/path/to/source-folder" --retries 5 --retry-wait 20
 ```
 
+## 常见问题
+
+### 已经安装 MarkItDown，但仍提示 `No module named 'markitdown'`
+
+这通常是因为 OCR 适配器使用的 Python 不是当前虚拟环境里的 Python。
+
+先确认已经激活虚拟环境：
+
+```bash
+source .venv/bin/activate
+which python
+python -c "import markitdown; print('markitdown ok')"
+```
+
+如果仍然失败，可以显式指定 OCR 适配器使用虚拟环境里的 Python：
+
+```bash
+./ocr_markdown_pipeline.py "/path/to/source-folder" \
+  --ocr-python ".venv/bin/python"
+```
+
 ## 第三方开源项目说明
 
 本项目是一个编排层，会调用第三方工具，但不会把这些第三方项目的源码打包进本仓库。
